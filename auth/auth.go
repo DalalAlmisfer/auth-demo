@@ -1,13 +1,16 @@
 package auth
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
 	"time"
 	"zitadel-v2/config"
 
+	"github.com/google/uuid"
 	"github.com/zitadel/oidc/pkg/client/rp"
+	"github.com/zitadel/oidc/pkg/oidc"
 )
 
 var (
@@ -35,16 +38,15 @@ func Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func OIDCAuth(promot string, w http.ResponseWriter, r *http.Request) {
-	// retrieve the identity provider details
-	provider := Prepare()
-	// generate the code challange and store the code in a cookie named pkce
-	codeChallenge, _ := rp.GenerateAndStoreCodeChallenge(w, provider)
+	// generate the code challange and store in a global varibale
+	authSetting.CodeVerifier = base64.RawURLEncoding.EncodeToString([]byte(uuid.New().String()))
+	codeChallenge := oidc.NewSHACodeChallenge(authSetting.CodeVerifier)
 	// build the authrization url
 	url := url.Values{}
 	url.Set("client_id", authSetting.ClientId)
 	url.Set("redirect_uri", authSetting.RedirectUri)
 	url.Set("response_type", "code")
-	url.Set("scope", "openid&email&profile")
+	url.Set("scope", "openid")
 	url.Set("promot", promot)
 	url.Set("code_challenge", codeChallenge)
 	url.Set("code_challenge_method", "S256")
@@ -55,13 +57,13 @@ func OIDCAuth(promot string, w http.ResponseWriter, r *http.Request) {
 func Callback(w http.ResponseWriter, r *http.Request) {
 	// retrieve the authorization code
 	code := r.URL.Query().Get("code")
-	// retrieve the code challange we stored in OIDCAuth to verify the request
-	codeverifier, err := authSetting.Provider.CookieHandler().CheckCookie(r, "ehtwaa")
+
+	provider, err := GetProvider()
 	if err != nil {
-		fmt.Println(" error at CheckCookie, ", err)
+		fmt.Printf("Error at NewRelyingPartyOIDC, %s \n", err)
 	}
 	// exchange the authorization code and the code verifier with a token
-	t, err := rp.CodeExchange(r.Context(), code, authSetting.Provider, rp.WithCodeVerifier(codeverifier))
+	t, err := rp.CodeExchange(r.Context(), code, provider, rp.WithCodeVerifier(authSetting.CodeVerifier))
 	if err != nil {
 		fmt.Println("Error at CodeExchange, ", err)
 	}
@@ -70,7 +72,7 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/home", http.StatusSeeOther)
 }
 
-func Prepare() rp.RelyingParty {
+func GetProvider() (rp.RelyingParty, error) {
 	options := []rp.Option{
 		rp.WithVerifierOpts(rp.WithIssuedAtOffset(5 * time.Second)),
 	}
@@ -79,8 +81,7 @@ func Prepare() rp.RelyingParty {
 		authSetting.RedirectUri, authSetting.Scopes,
 		options...)
 	if err != nil {
-		fmt.Printf("Error at NewRelyingPartyOIDC, %s \n", err)
+		return nil, err
 	}
-	authSetting.Provider = provider
-	return provider
+	return provider, nil
 }

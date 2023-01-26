@@ -13,6 +13,7 @@ type OIDC struct {
 	Scopes       []string
 	Promot       []string
 	Provider     rp.RelyingParty
+	CodeVerifier string
 }
 
 var Settings = struct {
